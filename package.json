@@ -1,0 +1,22 @@
+{
+  "name": "space-news",
+  "version": "1.0.0",
+  "main": "lib/index.js",
+  "author": "William Rory Kronmiller",
+  "license": "UNLICENSED",
+  "dependencies": {
+    "babel-cli": "^6.24.1",
+    "babel-preset-latest": "^6.24.1",
+    "bodybuilder": "^2.1.0",
+    "elasticsearch": "^13.1.1",
+    "feedparser": "^2.2.0",
+    "flatmap": "^0.0.3",
+    "htmlparser2": "^3.9.2",
+    "parse5": "^3.0.2",
+    "request": "^2.81.0"
+  },
+  "scripts": {
+    "test": "nodemon --exec babel-node lib/index.js",
+    "start": "babel-node lib/index.js"
+  }
+}
