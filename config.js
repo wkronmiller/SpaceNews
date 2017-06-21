@@ -19,3 +19,6 @@ export const htmlLinks = [
   'http://feeds.reuters.com/reuters/scienceNews',
   'http://spacenews.com/feed/',
 ];
+
+// Name of elasticsearch index used
+export const index = 'spacenews';
