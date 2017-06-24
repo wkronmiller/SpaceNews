@@ -1,6 +1,10 @@
 import fs from 'fs';
 import FeedParser from 'feedparser';
 import parse5 from 'parse5';
+import nlp from 'compromise';
+import natural from 'natural';
+import Jaccard from 'jaccard-index';
+import stringSimilarity from 'string-similarity';
 import request from 'request';
 import {Client} from 'elasticsearch';
 import {
@@ -13,7 +17,9 @@ import {
 } from '../config';
 import {AWSUploader} from './uploader';
 
-const client = new Client({host: esHost, log: 'error',});
+console.log('Connecting to elasticsearch host', esHost);
+
+const client = new Client({host: { host: esHost, port: 9200 }, log: 'error',});
 
 
 /** 
@@ -105,7 +111,7 @@ function deleteIndex() {
 
 /** Searches elasticsearch for the best news according to query */
 function getBestNews() {
-  const size = 10; // Number of results to return
+  const size = 100; // Number of results to return
   // Give priority to more recent articles
   const dateFunction = {
     weight: 5,
@@ -120,7 +126,7 @@ function getBestNews() {
   // Give lower priority to articles with spammy terms
   const spamFunctions = spamTerms.map(term => ({
     filter: { match: { _any: `"${term}"` } },
-    weight: .01,
+    weight: .001,
   }));
   const functions = [dateFunction].concat(spamFunctions);
   const body = {
@@ -132,7 +138,7 @@ function getBestNews() {
             query: searchTerms.join(' OR ')
           },
         },
-        score_mode: 'sum',
+        score_mode: 'multiply',
         boost_mode: 'multiply',
         functions,
       },
@@ -154,15 +160,83 @@ function getBestNews() {
     .then(hits => hits.map(({_source}) => _source));
 }
 
+function addToArrayMap(key, val, arrayMap) {
+  if(arrayMap[key]) {
+    arrayMap[key].push(val);
+  } else {
+    arrayMap[key] = [val];
+  }
+  return arrayMap;
+}
+
+const clean = (string) => string.toLowerCase().replace(/[',\/=0-9\(\)\.:@|-]/g, '').replace(/  /g, ' ').trim()
+
+
+/**
+ * Try to eliminate articles that are about the same thing
+ * 
+ * Gives priority to articles with lower array indices
+ */
+function filterSimilar(articles) {
+  const jaccardThreshold = 0.1;
+  const jaccard = Jaccard();
+  const searchElem = 'mainText';
+
+  // Extract topic words
+  const topics = articles
+    .map(article => clean(nlp(article[searchElem]).nouns().out()))
+    .map(topic => topic.split(' ').map(word => natural.PorterStemmer.stem(word)).join(' '));
+
+  // Build TF/IDF database
+  const tfidf = new natural.TfIdf();
+  topics.forEach(topic => tfidf.addDocument(topic));
+
+  const commonTerms = new Set(searchTerms.map(term => clean(term)));
+  const topK = 8;
+  const importantTerms = tfidf.documents
+    .map((_,index) => tfidf.listTerms(index).map(({term}) => term).slice(0, topK))
+    .map(terms => {
+      return terms.filter(term => commonTerms.has(term) === false)
+    });
+  const indicesToRemove = new Set();
+  for(var i = 0; i + 1 < importantTerms.length; i++) {
+    let toCompare = importantTerms.slice(i + 1);
+    let left = importantTerms[i];
+    toCompare.forEach((right, relIndex) => {
+        if(jaccard.index(left, right) > jaccardThreshold) {
+          let absIndex = relIndex + i;
+          indicesToRemove.add(absIndex);
+        }
+      })
+  }
+
+  return articles.filter((_, index) => indicesToRemove.has(index) === false);
+}
+
+function isNotSpammy({titleText, mainText}) {
+  const badness = spamTerms.map(term => term.toLowerCase());
+  const body = clean(`${titleText} ${mainText}`);
+  return badness.every(spamTerm => body.indexOf(spamTerm) === -1);
+}
+
+const MAX_ARTICLES = 10;
+
 (function main() {
   const uploader = new AWSUploader();
   uploader.configure({});
   Promise.resolve()
-    .then(() => loadLinks())
-    .then(() => client.indices.flushSynced())
+    //.then(() => client.ping().then(console.log))
+    //.then(() => loadLinks())
+    //.then(() => client.indices.flushSynced())
     .then(() => getBestNews())
+    // Sort by recency
     .then(flatLinks => flatLinks.sort(({updateDate: dateA}, {updateDate: dateB}) => (new Date(dateA)).getTime() - (new Date(dateB)).getTime()))
     .then(flatLinks => flatLinks.reverse())
+    .then(flatLinks => flatLinks.filter(isNotSpammy))
+    // Remove similar articles
+    .then(filterSimilar)
+    .then(flatLinks => flatLinks.slice(0, MAX_ARTICLES))
+    // Convert to JSON and save to S3
     .then(body => JSON.stringify(body, null, 2))
     .then(body => uploader.upload(body))
     .then(console.log)
