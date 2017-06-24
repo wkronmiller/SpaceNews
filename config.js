@@ -1,5 +1,7 @@
+// Hostname of exlasticsearch server
+export const esHost = process.env.ES_HOSTNAME || 'http://localhost:9200'; 
 // Terms to look for
-export const searchTerms =['space', 'SLS', 'satellite', 'launch', 'planet', 'star'];
+export const searchTerms = (process.env.SEARCH_TERMS || '*').split(',');
 // Terms to avoid
 export const spamTerms = ['find out', 'students', '12 reasons', 'star trek'];
 
@@ -18,7 +20,12 @@ export const htmlLinks = [
   'http://feeds.reuters.com/reuters/topNews',
   'http://feeds.reuters.com/reuters/scienceNews',
   'http://spacenews.com/feed/',
+  'https://www.theatlantic.com/feed/all/',
 ];
 
 // Name of elasticsearch index used
-export const index = 'spacenews';
+export const index = process.env.ES_INDEX || 'newsindex';
+
+// S3 Upload Parameters
+export const bucketName = process.env.BUCKET_NAME;
+export const bucketKey = process.env.BUCKET_KEY;

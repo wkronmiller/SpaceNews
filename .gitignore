@@ -2,3 +2,4 @@ node_modules/
 rawResults.json
 output.json
 *.swp
+*.sh

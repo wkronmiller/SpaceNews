@@ -5,6 +5,7 @@
   "author": "William Rory Kronmiller",
   "license": "UNLICENSED",
   "dependencies": {
+    "aws-sdk": "^2.77.0",
     "babel-cli": "^6.24.1",
     "babel-preset-latest": "^6.24.1",
     "bodybuilder": "^2.1.0",
