@@ -1,4 +1,5 @@
 node_modules/
+lib/
 rawResults.json
 output.json
 *.swp
