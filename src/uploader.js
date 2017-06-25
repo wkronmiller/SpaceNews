@@ -27,6 +27,6 @@ export class AWSUploader {
     return new Promise((resolve) => this._s3.putObject(uploadParams, (err, data) => {
       if(err) { throw err; }
       return resolve(data);
-    }));
+    })).then(res => ({body, res}));
   }
 }

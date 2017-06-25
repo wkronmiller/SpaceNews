@@ -1,11 +1,9 @@
 import fs from 'fs';
 import FeedParser from 'feedparser';
 import parse5 from 'parse5';
-import nlp from 'compromise';
-import natural from 'natural';
-import Jaccard from 'jaccard-index';
-import stringSimilarity from 'string-similarity';
 import request from 'request';
+import leven from 'leven';
+import stopwords from 'stopwords';
 import {Client} from 'elasticsearch';
 import {
   index, 
@@ -14,13 +12,13 @@ import {
   cleanLinks, 
   htmlLinks,
   esHost,
+  operations,
 } from '../config';
 import {AWSUploader} from './uploader';
 
 console.log('Connecting to elasticsearch host', esHost);
 
 const client = new Client({host: { host: esHost, port: 9200 }, log: 'error',});
-
 
 /** 
  * Construct the components of an elasticsearch bulk request for a single document
@@ -35,8 +33,8 @@ const mkIndexRequest = (body) => [{ index: {
 ];
 
 /** Extract/rename parsed RSS data */
-function extractItem({date, link: redirectionUrl, guid: uid, title: titleText, summary: mainText}) {
-  const updateDate = new Date(date);
+function extractItem({pubDate, link: redirectionUrl, guid: uid, title: titleText, summary: mainText}) {
+  const updateDate = new Date(pubDate);
   const nonAscii = /[^\x00-\x7F]/g;
   titleText = titleText.replace(nonAscii, '');
   mainText = mainText.replace(nonAscii, '');
@@ -111,7 +109,7 @@ function deleteIndex() {
 
 /** Searches elasticsearch for the best news according to query */
 function getBestNews() {
-  const size = 100; // Number of results to return
+  const size = 10; // Number of results to return
   // Give priority to more recent articles
   const dateFunction = {
     weight: 5,
@@ -142,7 +140,7 @@ function getBestNews() {
         boost_mode: 'multiply',
         functions,
       },
-    }
+    },
   };
   const searchParams = {
     index,
@@ -156,7 +154,7 @@ function getBestNews() {
       fs.writeFile('rawResults.json', JSON.stringify(results, null, 2), () => {});
       return results;
     })
-    .then(({hits}) => hits.hits)
+    .then(({hits: {hits}}) => hits)
     .then(hits => hits.map(({_source}) => _source));
 }
 
@@ -171,45 +169,50 @@ function addToArrayMap(key, val, arrayMap) {
 
 const clean = (string) => string.toLowerCase().replace(/[',\/=0-9\(\)\.:@|-]/g, '').replace(/  /g, ' ').trim()
 
-
+// Maximum allowable bigram overlap
+const OVERLAP_THRESHOLD = 1;
 /**
  * Try to eliminate articles that are about the same thing
  * 
  * Gives priority to articles with lower array indices
  */
 function filterSimilar(articles) {
-  const jaccardThreshold = 0.1;
-  const jaccard = Jaccard();
-  const searchElem = 'mainText';
-
-  // Extract topic words
-  const topics = articles
-    .map(article => clean(nlp(article[searchElem]).nouns().out()))
-    .map(topic => topic.split(' ').map(word => natural.PorterStemmer.stem(word)).join(' '));
-
-  // Build TF/IDF database
-  const tfidf = new natural.TfIdf();
-  topics.forEach(topic => tfidf.addDocument(topic));
-
-  const commonTerms = new Set(searchTerms.map(term => clean(term)));
-  const topK = 8;
-  const importantTerms = tfidf.documents
-    .map((_,index) => tfidf.listTerms(index).map(({term}) => term).slice(0, topK))
-    .map(terms => {
-      return terms.filter(term => commonTerms.has(term) === false)
-    });
-  const indicesToRemove = new Set();
-  for(var i = 0; i + 1 < importantTerms.length; i++) {
-    let toCompare = importantTerms.slice(i + 1);
-    let left = importantTerms[i];
-    toCompare.forEach((right, relIndex) => {
-        if(jaccard.index(left, right) > jaccardThreshold) {
-          let absIndex = relIndex + i;
-          indicesToRemove.add(absIndex);
-        }
-      })
+  const compareElems = ['titleText', 'mainText'];
+  function extractText(article) {
+    return compareElems.map(elem => article[elem]).reduce((a,b) => a + b);
   }
-
+  const stopWords = new Set(stopwords.english);
+  function tokenize(string) {
+    return string
+      .split(/\s/)
+      .filter(elem => elem.length > 0)
+      .map(elem => elem.toLowerCase())
+      .filter(elem => stopWords.has(elem) === false);
+  }
+  function makeBigrams(tokens) {
+    return tokens
+      // Make bigrams from adjacent words
+      .map((left, index) => tokens.slice(index + 1, index + 2).map(right => `${left}${right}`))
+      .reduce((a, b) => a.concat(b), []);
+  }
+  function getBigramOverlaps(left, right) {
+    const leftGrams = Array.from(new Set(makeBigrams(tokenize(left)))); //Dedup
+    const rightGrams = new Set(makeBigrams(tokenize(right)));
+    return leftGrams.filter(left => rightGrams.has(left));
+  }
+  const indicesToRemove = new Set();
+  articles.forEach((article, index) => {
+    if(indicesToRemove.has(index)) { return; }
+    articles.slice(index + 1).forEach((other, otherRelIndex) => {
+      const left = extractText(article);
+      const right = extractText(other);
+      const overlaps = getBigramOverlaps(left,right);
+      if(overlaps.length > OVERLAP_THRESHOLD) {
+        const otherAbsIndex = otherRelIndex + index + 1;
+        indicesToRemove.add(otherAbsIndex);
+      }
+    });
+  });
   return articles.filter((_, index) => indicesToRemove.has(index) === false);
 }
 
@@ -221,16 +224,94 @@ function isNotSpammy({titleText, mainText}) {
 
 const MAX_ARTICLES = 10;
 
+/**
+ * Reset index to configured mapping
+ */
+function configureIndex() {
+  console.log('Reconfiguring index', index);
+  return client.indices.delete({index})
+  .then(console.log)
+  .then(() => client.indices.flushSynced())
+  .then(() => client.indices.create({
+    index,
+    body: {
+      mappings: {
+        flashentry: {
+          properties: {
+            mainText: {
+              type: 'text',
+              fielddata: true,
+            },
+            titleText: { 
+              type: 'text',
+              fielddata: true,
+            },
+            redirectionUrl: { type: 'keyword' },
+            uid: { type: 'keyword' },
+            updateDate: { type: 'date' },
+          },
+        }
+      },
+    }
+  }))
+  .then(() => client.indices.flushSynced());
+}
+
+function getOperations() {
+  const FORMATINDEX='FORMATINDEX',
+    FETCHNEWS='FETCHNEWS',
+    PUBLISH='PUBLISH';
+  const defaultOperations = {
+    configIndex: false,
+    loadLinks: false,
+    getResults: false,
+  };
+  if(!operations) {
+    throw 'No operation specified';
+  }
+  return operations.trim().split(/[,\s]/).filter(operation => operation.length > 0).reduce((ops, operation) => {
+    switch(operation) {
+      case FORMATINDEX:
+        ops.configIndex = true;
+        break;
+      case FETCHNEWS:
+        ops.loadLinks = true;
+        break;
+      case PUBLISH:
+        ops.getResults = true;
+        break;
+      default:
+        console.error('Unrecognized operation', operation);
+        break;
+    }
+    return ops; 
+  }, defaultOperations);
+}
+
+function execOrSkip(doExec, futureFunc) {
+  if(doExec) {
+    return futureFunc;
+  }
+  return () => Promise.resolve();
+}
+
 (function main() {
   const uploader = new AWSUploader();
   uploader.configure({});
-  Promise.resolve()
-    //.then(() => client.ping().then(console.log))
-    //.then(() => loadLinks())
-    //.then(() => client.indices.flushSynced())
+  const operations = getOperations();
+  console.log('operations', operations);
+  const loaderPromise = Promise.resolve()
+    .then(() => execOrSkip(operations.configIndex, configureIndex)())
+    .then(() => execOrSkip(operations.loadLinks, loadLinks)())
+    .then(() => execOrSkip(operations.loadLinks, client.indices.flushSynced)())
+    .catch((err) => console.error('Loaders failed', err));
+  if(operations.getResults) {
+    console.log('Publishing best results');
+    loaderPromise
     .then(() => getBestNews())
     // Sort by recency
-    .then(flatLinks => flatLinks.sort(({updateDate: dateA}, {updateDate: dateB}) => (new Date(dateA)).getTime() - (new Date(dateB)).getTime()))
+    .then(flatLinks => flatLinks.sort(({updateDate: dateA}, {updateDate: dateB}) => 
+      (new Date(dateA)).getTime() - (new Date(dateB)).getTime()))
     .then(flatLinks => flatLinks.reverse())
     .then(flatLinks => flatLinks.filter(isNotSpammy))
     // Remove similar articles
@@ -238,7 +319,8 @@ const MAX_ARTICLES = 10;
     .then(flatLinks => flatLinks.slice(0, MAX_ARTICLES))
     // Convert to JSON and save to S3
     .then(body => JSON.stringify(body, null, 2))
+    .then(passthroughLog)
     .then(body => uploader.upload(body))
-    .then(console.log)
-    .catch((err) => console.error('Generation failed', err));
+    .catch((err) => console.error('Publication failed', err));
+  }
 })();

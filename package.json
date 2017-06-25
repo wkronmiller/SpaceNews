@@ -12,15 +12,12 @@
     "compromise": "^10.5.2",
     "elasticsearch": "^13.1.1",
     "feedparser": "^2.2.0",
-    "flatmap": "^0.0.3",
     "htmlparser2": "^3.9.2",
-    "jaccard": "^0.4.0",
-    "jaccard-index": "^0.2.0",
-    "natural": "^0.5.4",
+    "leven": "^2.1.0",
     "parse5": "^3.0.2",
     "request": "^2.81.0",
-    "string-similarity": "^1.2.0",
-    "word2vec": "^1.1.1"
+    "stopwords": "^0.0.5",
+    "string-similarity": "^1.2.0"
   },
   "scripts": {
     "test": "babel-node src/index.js",

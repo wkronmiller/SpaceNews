@@ -38,4 +38,6 @@ index : process.env.ES_INDEX,
 // S3 Upload Parameters
 bucketName : process.env.BUCKET_NAME,
 bucketKey : process.env.BUCKET_KEY,
+// What this instance is doing - FORMATINDEX,FETCHNEWS,PUBLISH
+operations: process.env.OPERATIONS,
 };
