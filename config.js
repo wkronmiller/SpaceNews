@@ -12,6 +12,7 @@ spamTerms : [
   'episode',
   'star trek',
   'cover image',
+  'most amazing',
 ],
 
 // Links that have plain text RSS summaries

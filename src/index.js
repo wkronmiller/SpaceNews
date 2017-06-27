@@ -109,7 +109,7 @@ function deleteIndex() {
 
 /** Searches elasticsearch for the best news according to query */
 function getBestNews() {
-  const size = 10; // Number of results to return
+  const size = 30; // Number of results to return
   // Give priority to more recent articles
   const dateFunction = {
     weight: 5,
@@ -229,32 +229,33 @@ const MAX_ARTICLES = 10;
  */
 function configureIndex() {
   console.log('Reconfiguring index', index);
-  return client.indices.delete({index})
-  .then(console.log)
-  .then(() => client.indices.flushSynced())
-  .then(() => client.indices.create({
-    index,
-    body: {
-      mappings: {
-        flashentry: {
-          properties: {
-            mainText: {
-              type: 'text',
-              fielddata: true,
+  return client.indices.exists({index})
+    .then(exists => exists ? client.indices.delete({index}) : Promise.resolve())
+    .then(console.log)
+    .then(() => client.indices.flushSynced())
+    .then(() => client.indices.create({
+      index,
+      body: {
+        mappings: {
+          flashentry: {
+            properties: {
+              mainText: {
+                type: 'text',
+                fielddata: true,
+              },
+              titleText: { 
+                type: 'text',
+                fielddata: true,
+              },
+              redirectionUrl: { type: 'keyword' },
+              uid: { type: 'keyword' },
+              updateDate: { type: 'date' },
             },
-            titleText: { 
-              type: 'text',
-              fielddata: true,
-            },
-            redirectionUrl: { type: 'keyword' },
-            uid: { type: 'keyword' },
-            updateDate: { type: 'date' },
-          },
-        }
-      },
-    }
-  }))
-  .then(() => client.indices.flushSynced());
+          }
+        },
+      }
+    }))
+    .then(() => client.indices.flushSynced());
 }
 
 function getOperations() {
@@ -303,7 +304,6 @@ function execOrSkip(doExec, futureFunc) {
   const loaderPromise = Promise.resolve()
     .then(() => execOrSkip(operations.configIndex, configureIndex)())
     .then(() => execOrSkip(operations.loadLinks, loadLinks)())
-    .then(() => execOrSkip(operations.loadLinks, client.indices.flushSynced)())
     .catch((err) => console.error('Loaders failed', err));
   if(operations.getResults) {
     console.log('Publishing best results');
