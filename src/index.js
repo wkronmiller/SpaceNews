@@ -46,8 +46,12 @@ function readRSS(url) {
   const req = request(url);
   const feedparser = new FeedParser();
   return new Promise(resolve => {
-    req.on('error', err => {throw err;});
+    req.on('error', err => {
+      console.error('Failed to load feed', url);
+      throw err;
+    });
     req.on('response', function (response) {
+      console.log('Loading feed', url);
       this.pipe(feedparser);
     });
     var buffer = [];
@@ -296,6 +300,12 @@ function execOrSkip(doExec, futureFunc) {
   return () => Promise.resolve();
 }
 
+function addTitleToBody(article) {
+  const {titleText, mainText} = article;
+  article.mainText = `${titleText}: ${mainText}`;
+  return article;
+}
+
 (function main() {
   const uploader = new AWSUploader();
   uploader.configure({});
@@ -317,6 +327,7 @@ function execOrSkip(doExec, futureFunc) {
     // Remove similar articles
     .then(filterSimilar)
     .then(flatLinks => flatLinks.slice(0, MAX_ARTICLES))
+    .then(flatLinks => flatLinks.map(addTitleToBody))
     // Convert to JSON and save to S3
     .then(body => JSON.stringify(body, null, 2))
     .then(passthroughLog)
