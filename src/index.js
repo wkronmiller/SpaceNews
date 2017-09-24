@@ -12,13 +12,14 @@ import {
   cleanLinks, 
   htmlLinks,
   esHost,
+  esPort,
   operations,
 } from '../config';
 import {AWSUploader} from './uploader';
 
 console.log('Connecting to elasticsearch host', esHost);
 
-const client = new Client({host: { host: esHost, port: 9200 }, log: 'error',});
+const client = new Client({host: { host: esHost, port: esPort }, log: 'error',});
 
 /** 
  * Construct the components of an elasticsearch bulk request for a single document
@@ -234,9 +235,8 @@ const MAX_ARTICLES = 10;
 function configureIndex() {
   console.log('Reconfiguring index', index);
   return client.indices.exists({index})
-    .then(exists => exists ? client.indices.delete({index}) : Promise.resolve())
+    .then(exists => exists ? client.indices.delete({index}) : Promise.resolve('no existing'))
     .then(console.log)
-    .then(() => client.indices.flushSynced())
     .then(() => client.indices.create({
       index,
       body: {
@@ -259,7 +259,7 @@ function configureIndex() {
         },
       }
     }))
-    .then(() => client.indices.flushSynced());
+    .then(res => console.log('Index creation result', res));
 }
 
 function getOperations() {

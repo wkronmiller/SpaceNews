@@ -1,6 +1,7 @@
 module.exports = {
 // Hostname of exlasticsearch server
 esHost: process.env.ES_HOSTNAME,
+esPort: parseInt(process.env.ES_PORT || '9200'),
 // Terms to look for
 searchTerms : process.env.SEARCH_TERMS.split(','),
 // Terms to avoid
@@ -11,8 +12,10 @@ spamTerms : [
   'calendar',
   'episode',
   'star trek',
+  'star wars',
   'cover image',
   'most amazing',
+  'disney',
 ],
 
 // Links that have plain text RSS summaries
@@ -20,7 +23,7 @@ cleanLinks : [
   'https://www.nasa.gov/rss/dyn/breaking_news.rss',
   'https://www.space.com/home/feed/site.xml',
   'http://spectrum.ieee.org/rss/aerospace/fulltext',
-  'https://www.sciencedaily.com/rss/space_time.xml',
+//  'https://www.sciencedaily.com/rss/space_time.xml',
 ],
 
 // Links that embed HTML fragments into their RSS summaries
